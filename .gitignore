@@ -1,0 +1,12 @@
+*~
+*.cabal
+.stack-work
+
+
+*#
+*~
+_cache/
+_site/
+result
+
+*.tar.gz

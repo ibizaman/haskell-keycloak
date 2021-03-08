@@ -1,0 +1,23 @@
+resolver: lts-14.17
+
+build:
+    # https://github.com/haskell/haskell-ide-engine/issues/1564#issuecomment-636315399
+    test: true
+
+packages:
+    - .
+extra-deps:
+    - aeson-1.5.5.1
+    - data-fix-0.3.1
+    - envy-2.1.0.0
+    - optparse-applicative-0.15.1.0
+    - primitive-0.7.1.0
+    - servant-0.18.2
+    - servant-client-0.18.2
+    - servant-client-core-0.18.2
+    - servant-server-0.18.2
+    - strict-0.4.0.1
+    - these-1.1.1.1
+    - time-compat-1.9.5
+    - wai-app-static-3.1.7.2
+    - wai-extra-3.1.6

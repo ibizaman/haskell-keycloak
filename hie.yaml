@@ -1,0 +1,11 @@
+cradle:
+    stack:
+        - path: ./test
+          component: "haskell-keycloak:test:haskell-keycloak-test"
+        - path: ./src
+          component: "haskell-keycloak:lib"
+        - path: ./app
+          component: "haskell-keycloak:exe:haskell-keycloak-exe"
+
+dependencies:
+    - package.yaml
