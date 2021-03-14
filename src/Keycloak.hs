@@ -48,6 +48,7 @@ import Data.Aeson.Types (Parser)
 import Data.Bifunctor (Bifunctor (bimap))
 import Data.Char (isUpper, toLower)
 import qualified Data.HashMap.Strict as HashMap
+import Data.Map.Strict (Map)
 import Data.Monoid (Last (..))
 import Data.Proxy (Proxy (Proxy))
 import Data.Text (Text)
@@ -217,18 +218,44 @@ instance S.ToHttpApiData ResourceID where
   toUrlPiece = unResourceID
 
 data ClientInfo = ClientInfo
+  -- Commented out fields are TODO
   { ciClientId :: Text,
-    ciRootUrl :: Maybe Text,
-    ciProtocol :: Text,
-    ciConsentRequired :: Bool,
-    ciStandardFlowEnabled :: Bool,
-    ciImplicitFlowEnabled :: Bool,
-    ciDirectAccessGrantsEnabled :: Bool,
-    ciServiceAccountsEnabled :: Bool,
+    ciAccess :: Maybe (Map String Bool),
+    ciAdminUrl :: Maybe Text,
+    ciAlwaysDisplayInConsole :: Maybe Bool,
+    ciAttributes :: Maybe (Map String String),
+    ciAuthenticationFlowBindingOverrides :: Maybe (Map String String),
     ciAuthorizationServicesEnabled :: Maybe Bool,
-    ciPublicClient :: Bool,
-    ciFrontchannelLogout :: Bool,
-    ciClientAuthenticatorType :: Text
+    -- ciAuthorizationSettings :: ResourceServerRepresentation,
+    ciBaseUrl :: Maybe Text,
+    ciBearerOnly :: Maybe Bool,
+    ciClientAuthenticatorType :: Maybe Text,
+    ciConsentRequired :: Maybe Bool,
+    ciDefaultClientScopes :: Maybe [Text],
+    ciDefaultRoles :: Maybe [Text],
+    ciDescription :: Maybe Text,
+    ciDirectAccessGrantsEnabled :: Maybe Bool,
+    ciEnabled :: Maybe Bool,
+    ciFrontchannelLogout :: Maybe Bool,
+    ciFullScopeAllowed :: Maybe Bool,
+    ciImplicitFlowEnabled :: Maybe Bool,
+    ciName :: Maybe Text,
+    ciNodeReRegistrationTimeout :: Maybe Int,
+    ciNotBefore :: Maybe Int,
+    ciOptionalClientScopes :: Maybe [Text],
+    ciOrigin :: Maybe Text,
+    ciProtocol :: Maybe Text,
+    -- ciProtocolMappers :: Maybe [ProtocolMapperRepresentation]
+    ciPublicClient :: Maybe Bool,
+    ciRedirectUris :: Maybe [Text],
+    ciRegisteredNodes :: Maybe (Map String String),
+    ciRegistrationAccessToken :: Maybe Text,
+    ciRootUrl :: Maybe Text,
+    ciSecret :: Maybe Text,
+    ciServiceAccountsEnabled :: Maybe Bool,
+    ciStandardFlowEnabled :: Maybe Bool,
+    ciSurrogateAuthRequired :: Maybe Bool,
+    ciWebOrigins :: Maybe [Text]
   }
   deriving (Generic)
 

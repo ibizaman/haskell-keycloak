@@ -15,6 +15,7 @@ dependencies:
     # base must match what comes with ghc
     - base == 4.12.0.0
     - aeson == 1.5.*
+    - containers
     - generic-data == 0.7.*
     - http-api-data == 0.4.*
     - http-client == 0.6.*
