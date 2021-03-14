@@ -7,6 +7,7 @@ module Args
     IP (..),
     ServerIP (..),
     Subdomain (..),
+    ClientIdentifier (..),
     getArgs,
   )
 where
@@ -47,12 +48,16 @@ data ServerIP = ServerIP Server IP
 
 newtype Subdomain = Subdomain {unSubdomain :: Text}
 
+data ClientIdentifier
+  = ClientID Keycloak.ClientID
+  | ResourceID Keycloak.ResourceID
+
 data Command
   = Authenticate
   | CreateClient Keycloak.Realm Keycloak.ClientInfo
   | ListClients Keycloak.Realm
-  | ShowClient Keycloak.Realm (NonEmpty Keycloak.ResourceID)
-  | DeleteClient Keycloak.Realm (NonEmpty Keycloak.ResourceID)
+  | ShowClient Keycloak.Realm (NonEmpty ClientIdentifier)
+  | DeleteClient Keycloak.Realm (NonEmpty ClientIdentifier)
 
 argsParser :: Opts.Parser Args
 argsParser =
@@ -87,9 +92,12 @@ clientParser =
           ( Opts.info
               ( ShowClient <$> realmParser
                   <*> some1
-                    ( Opts.argument
-                        (Keycloak.ResourceID <$> Opts.str)
-                        (Opts.metavar "CLIENTID")
+                    ( Opts.option
+                        (ResourceID . Keycloak.ResourceID <$> Opts.str)
+                        (Opts.long "id" <> Opts.metavar "RESOURCEID")
+                        <|> Opts.option
+                          (ClientID . Keycloak.ClientID <$> Opts.str)
+                          (Opts.long "clientid" <> Opts.metavar "CLIENTID")
                     )
               )
               (Opts.progDesc "Show a client")
@@ -99,9 +107,12 @@ clientParser =
           ( Opts.info
               ( DeleteClient <$> realmParser
                   <*> some1
-                    ( Opts.argument
-                        (Keycloak.ResourceID <$> Opts.str)
-                        (Opts.metavar "CLIENTID")
+                    ( Opts.option
+                        (ResourceID . Keycloak.ResourceID <$> Opts.str)
+                        (Opts.long "id" <> Opts.metavar "RESOURCEID")
+                        <|> Opts.option
+                          (ClientID . Keycloak.ClientID <$> Opts.str)
+                          (Opts.long "clientid" <> Opts.metavar "CLIENTID")
                     )
               )
               (Opts.progDesc "Delete a client")

@@ -21,7 +21,10 @@ module Keycloak
     ClientInfo (..),
     createClientQuery,
     listClientsQuery,
-    deleteClientQuery,
+    showClientByResourceIDQuery,
+    showClientByClientIDQuery,
+    deleteClientByResourceIDQuery,
+    deleteClientByClientIDQuery,
     Error (..),
     Status (..),
     KeycloakError (..),
@@ -60,6 +63,9 @@ import qualified Utils
 import qualified Web.FormUrlEncoded as Web
 
 newtype ClientID = ClientID {unClientID :: Text}
+
+instance S.ToHttpApiData ClientID where
+  toUrlPiece = unClientID
 
 data AuthCredentials = PasswordAuth
   { username :: Text,
@@ -116,14 +122,39 @@ listClientsQuery kc authToken = do
   let APIMethods {..} = mkApiMethods
       AuthenticatedAPIMethods {..} = mkAuthenticatedAPI authToken
       AdminAPIMethods {..} = mkAdminAPI $ realm kc
-  listClients
+  listClients Nothing
 
-deleteClientQuery :: KeycloakClient -> AuthToken -> ResourceID -> SC.ClientM S.NoContent
-deleteClientQuery kc authToken resourceID = do
+showClientByResourceIDQuery :: KeycloakClient -> AuthToken -> ResourceID -> SC.ClientM (WithResourceID ClientInfo)
+showClientByResourceIDQuery kc authToken resourceID = do
+  let APIMethods {..} = mkApiMethods
+      AuthenticatedAPIMethods {..} = mkAuthenticatedAPI authToken
+      AdminAPIMethods {..} = mkAdminAPI $ realm kc
+  getClient resourceID
+
+showClientByClientIDQuery :: KeycloakClient -> AuthToken -> ClientID -> SC.ClientM (Maybe (WithResourceID ClientInfo))
+showClientByClientIDQuery kc authToken clientID = do
+  let APIMethods {..} = mkApiMethods
+      AuthenticatedAPIMethods {..} = mkAuthenticatedAPI authToken
+      AdminAPIMethods {..} = mkAdminAPI $ realm kc
+  listClients (Just clientID) >>= \case
+    [] -> return Nothing
+    (x : _) -> return $ Just x
+
+deleteClientByResourceIDQuery :: KeycloakClient -> AuthToken -> ResourceID -> SC.ClientM S.NoContent
+deleteClientByResourceIDQuery kc authToken resourceID = do
   let APIMethods {..} = mkApiMethods
       AuthenticatedAPIMethods {..} = mkAuthenticatedAPI authToken
       AdminAPIMethods {..} = mkAdminAPI $ realm kc
   deleteClient resourceID
+
+deleteClientByClientIDQuery :: KeycloakClient -> AuthToken -> ClientID -> SC.ClientM S.NoContent
+deleteClientByClientIDQuery kc authToken clientID = do
+  let APIMethods {..} = mkApiMethods
+      AuthenticatedAPIMethods {..} = mkAuthenticatedAPI authToken
+      AdminAPIMethods {..} = mkAdminAPI $ realm kc
+  showClientByClientIDQuery kc authToken clientID >>= \case
+    Nothing -> return S.NoContent
+    Just clientInfo -> deleteClient $ cwiId clientInfo
 
 data AuthToken = AuthToken
   { accessToken :: Text,
@@ -169,7 +200,9 @@ newtype ResourceID = ResourceID {unResourceID :: Text}
 instance Show ResourceID where
   show = T.unpack . unResourceID
 
-instance FromJSON ResourceID
+instance FromJSON ResourceID where
+  parseJSON =
+    Aeson.withText "id" (pure . ResourceID)
 
 instance S.FromHttpApiData ResourceID where
   -- The url piece is the complete URL, including the hostname. We
@@ -203,7 +236,8 @@ instance ToJSON ClientInfo where
   toJSON =
     Aeson.genericToJSON
       ( Aeson.defaultOptions
-          { Aeson.fieldLabelModifier = removePrefix "ci"
+          { Aeson.fieldLabelModifier = removePrefix "ci",
+            Aeson.omitNothingFields = True
           }
       )
 
@@ -216,13 +250,13 @@ instance FromJSON ClientInfo where
       )
 
 data WithResourceID a = WithResourceID
-  { cwiId :: Text,
+  { cwiId :: ResourceID,
     cwiInfo :: a
   }
   deriving (Generic)
 
 instance (Show a) => Show (WithResourceID a) where
-  show (WithResourceID id' info) = T.unpack id' <> ":\n" <> show info
+  show (WithResourceID id' info) = T.unpack (unResourceID id') <> ":\n" <> show info
 
 instance (FromJSON a) => FromJSON (WithResourceID a) where
   parseJSON v =
@@ -232,7 +266,7 @@ instance (FromJSON a) => FromJSON (WithResourceID a) where
 
 instance (ToJSON a) => ToJSON (WithResourceID a) where
   toJSON (WithResourceID id' info) = case toJSON info of
-    Aeson.Object hashMap -> Aeson.Object (hashMap <> HashMap.singleton "id" (Aeson.String id'))
+    Aeson.Object hashMap -> Aeson.Object (hashMap <> HashMap.singleton "id" (Aeson.String (unResourceID id')))
     other -> other
 
 data ProtocolName = OpenidConnect
@@ -301,7 +335,9 @@ type AdminAPI =
              :> "models"
              :> S.ReqBody '[S.JSON] Protocol
              :> S.Post '[S.JSON] S.NoContent
-           :<|> S.Get '[S.JSON] [WithResourceID ClientInfo]
+           :<|> S.QueryParam "clientId" ClientID :> S.Get '[S.JSON] [WithResourceID ClientInfo]
+           :<|> S.Capture "resourceID" ResourceID
+             :> S.Get '[S.JSON] (WithResourceID ClientInfo)
            :<|> S.Capture "resourceID" ResourceID
              :> S.Delete '[S.JSON] S.NoContent
        )
@@ -318,7 +354,8 @@ newtype AuthenticatedAPIMethods = AuthenticatedAPIMethods
 data AdminAPIMethods = AdminAPIMethods
   { createClient :: ClientInfo -> SC.ClientM (S.Headers '[S.Header "Location" ResourceID] S.NoContent),
     addProtocolMapper :: ResourceID -> Protocol -> SC.ClientM S.NoContent,
-    listClients :: SC.ClientM [WithResourceID ClientInfo],
+    listClients :: Maybe ClientID -> SC.ClientM [WithResourceID ClientInfo],
+    getClient :: ResourceID -> SC.ClientM (WithResourceID ClientInfo),
     deleteClient :: ResourceID -> SC.ClientM S.NoContent
   }
 
@@ -335,7 +372,7 @@ mkApiMethods = APIMethods {..}
 
         mkAdminAPI realm = AdminAPIMethods {..}
           where
-            createClient :<|> addProtocolMapper :<|> listClients :<|> deleteClient = adminAPI realm
+            createClient :<|> addProtocolMapper :<|> listClients :<|> getClient :<|> deleteClient = adminAPI realm
 
 -- | The error returned by Keycloak.
 data Error
