@@ -33,6 +33,7 @@ import qualified Env
 import qualified Keycloak
 import Network.HTTP.Client.TLS (newTlsManager)
 import qualified Options.Applicative.Help as Help
+import qualified Rest
 import qualified Servant as S
 import qualified Servant.Client as SC
 import System.Environment (getProgName)
@@ -73,11 +74,12 @@ main =
           Left err -> displayErr $ Keycloak.parseError err
           Right token -> do
             let kc' = Keycloak.mkClient auth realm
-            run' endpoint (Keycloak.createClientQuery kc' token clientInfo)
+            run'
+              endpoint
+              (Rest.create (Keycloak.clientQueries kc' token) clientInfo)
               >>= \case
                 Left err' -> displayErr $ Keycloak.parseError err'
-                Right (Left clientIDErr) -> putStrLn clientIDErr
-                Right (Right clientID) -> print clientID
+                Right clientID -> print clientID
     command endpoint auth (Args.ListClients realm) = do
       let kc = Keycloak.mkClient auth (Keycloak.Realm "master")
       run' endpoint (Keycloak.authenticateQuery kc Keycloak.OpenidConnect)
@@ -85,14 +87,16 @@ main =
           Left err -> displayErr $ Keycloak.parseError err
           Right token -> do
             let kc' = Keycloak.mkClient auth realm
-            run' endpoint (Keycloak.listClientsQuery kc' token) >>= \case
-              Left err' -> displayErr $ Keycloak.parseError err'
-              Right cis ->
-                forM_ cis $
-                  putStrLn . \ciwr ->
-                    T.unpack (Keycloak.unResourceID (Keycloak.cwiId ciwr))
-                      <> " "
-                      <> T.unpack (Keycloak.ciClientId (Keycloak.cwiInfo ciwr))
+            run' endpoint (Rest.list (Keycloak.clientQueries kc' token))
+              >>= \case
+                Left err' -> displayErr $ Keycloak.parseError err'
+                Right cis ->
+                  forM_ cis $
+                    putStrLn . \ciwr ->
+                      T.unpack (Rest.unResourceID (Rest.resourceID ciwr))
+                        <> " "
+                        <> T.unpack
+                          (Keycloak.ciClientId (Rest.resourceInfo ciwr))
     command endpoint auth (Args.ShowClient realm clientIDs) = do
       let kc = Keycloak.mkClient auth (Keycloak.Realm "master")
       run' endpoint (Keycloak.authenticateQuery kc Keycloak.OpenidConnect)
@@ -105,21 +109,17 @@ main =
                   Args.ClientID clientID ->
                     run'
                       endpoint
-                      (Keycloak.showClientByClientIDQuery kc' token clientID)
+                      ( Rest.getByName
+                          (Keycloak.clientQueries kc' token)
+                          clientID
+                      )
                       >>= either
                         (displayErr . Keycloak.parseError)
-                        ( maybe
-                            (putStrLn "resource not found")
-                            (BS.putStrLn . AesonP.encodePretty)
-                        )
+                        (BS.putStrLn . AesonP.encodePretty)
                   Args.ResourceID resourceID ->
                     run'
                       endpoint
-                      ( Keycloak.showClientByResourceIDQuery
-                          kc'
-                          token
-                          resourceID
-                      )
+                      (Rest.get (Keycloak.clientQueries kc' token) resourceID)
                       >>= either
                         (displayErr . Keycloak.parseError)
                         (BS.putStrLn . AesonP.encodePretty)
@@ -136,12 +136,14 @@ main =
                   Args.ClientID clientID ->
                     run'
                       endpoint
-                      (Keycloak.deleteClientByClientIDQuery kc' token clientID)
+                      ( Rest.deleteByName
+                          (Keycloak.clientQueries kc' token)
+                          clientID
+                      )
                   Args.ResourceID resourceID ->
                     run'
                       endpoint
-                      ( Keycloak.deleteClientByResourceIDQuery kc' token resourceID
-                      )
+                      (Rest.delete (Keycloak.clientQueries kc' token) resourceID)
               )
                 >>= \case
                   Left err' -> displayErr $ Keycloak.parseError err'

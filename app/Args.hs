@@ -37,6 +37,7 @@ import Options.Applicative
 import qualified Options.Applicative as Opts
 import qualified Options.Applicative.Help.Pretty as P
 import qualified Options.Generic as OptGen
+import qualified Rest
 import Text.Read (readEither)
 import Utils (splitOn)
 import qualified Utils
@@ -59,7 +60,7 @@ newtype Subdomain = Subdomain {unSubdomain :: Text}
 
 data ClientIdentifier
   = ClientID Keycloak.ClientID
-  | ResourceID Keycloak.ResourceID
+  | ResourceID Rest.ResourceID
 
 data Command
   = Authenticate
@@ -102,7 +103,7 @@ clientParser =
               ( ShowClient <$> realmParser
                   <*> some1
                     ( Opts.option
-                        (ResourceID . Keycloak.ResourceID <$> Opts.str)
+                        (ResourceID . Rest.ResourceID <$> Opts.str)
                         (Opts.long "id" <> Opts.metavar "RESOURCEID")
                         <|> Opts.option
                           (ClientID . Keycloak.ClientID <$> Opts.str)
@@ -117,7 +118,7 @@ clientParser =
               ( DeleteClient <$> realmParser
                   <*> some1
                     ( Opts.option
-                        (ResourceID . Keycloak.ResourceID <$> Opts.str)
+                        (ResourceID . Rest.ResourceID <$> Opts.str)
                         (Opts.long "id" <> Opts.metavar "RESOURCEID")
                         <|> Opts.option
                           (ClientID . Keycloak.ClientID <$> Opts.str)
