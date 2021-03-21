@@ -68,6 +68,7 @@ data Command
   | ListClients Keycloak.Realm
   | ShowClient Keycloak.Realm (NonEmpty ClientIdentifier)
   | DeleteClient Keycloak.Realm (NonEmpty ClientIdentifier)
+  | ShowSecret Keycloak.Realm ClientIdentifier
 
 argsParser :: Opts.Parser Args
 argsParser =
@@ -100,34 +101,31 @@ clientParser =
         <> Opts.command
           "show"
           ( Opts.info
-              ( ShowClient <$> realmParser
-                  <*> some1
-                    ( Opts.option
-                        (ResourceID . Rest.ResourceID <$> Opts.str)
-                        (Opts.long "id" <> Opts.metavar "RESOURCEID")
-                        <|> Opts.option
-                          (ClientID . Keycloak.ClientID <$> Opts.str)
-                          (Opts.long "clientid" <> Opts.metavar "CLIENTID")
-                    )
-              )
+              (ShowClient <$> realmParser <*> some1 clientIdentifierParser)
               (Opts.progDesc "Show a client")
           )
         <> Opts.command
           "delete"
           ( Opts.info
-              ( DeleteClient <$> realmParser
-                  <*> some1
-                    ( Opts.option
-                        (ResourceID . Rest.ResourceID <$> Opts.str)
-                        (Opts.long "id" <> Opts.metavar "RESOURCEID")
-                        <|> Opts.option
-                          (ClientID . Keycloak.ClientID <$> Opts.str)
-                          (Opts.long "clientid" <> Opts.metavar "CLIENTID")
-                    )
-              )
+              (DeleteClient <$> realmParser <*> some1 clientIdentifierParser)
               (Opts.progDesc "Delete a client")
           )
+        <> Opts.command
+          "secret"
+          ( Opts.info
+              (ShowSecret <$> realmParser <*> clientIdentifierParser)
+              (Opts.progDesc "Show a client's secret")
+          )
     )
+
+clientIdentifierParser :: Opts.Parser ClientIdentifier
+clientIdentifierParser =
+  Opts.option
+    (ResourceID . Rest.ResourceID <$> Opts.str)
+    (Opts.long "id" <> Opts.metavar "RESOURCEID")
+    <|> Opts.option
+      (ClientID . Keycloak.ClientID <$> Opts.str)
+      (Opts.long "clientid" <> Opts.metavar "CLIENTID")
 
 realmParser :: Opts.Parser Keycloak.Realm
 realmParser =
@@ -165,7 +163,7 @@ instance OptGen.ParseField (Map String Bool) where
       )
     where
       f :: Either String [(String, String)] -> Either String [(String, Bool)]
-      f = join . fmap y
+      f = (y =<<)
 
       y :: [(String, String)] -> Either String [(String, Bool)]
       y = mapM (x . w)

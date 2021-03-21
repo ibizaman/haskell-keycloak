@@ -16,6 +16,9 @@ module Keycloak
     mkClient,
     authenticateQuery,
     clientQueries,
+    Secret (..),
+    secretQueries,
+    ClientAPIQueries (getSecret),
     ClientInfo (..),
     Error (..),
     Status (..),
@@ -90,8 +93,15 @@ authenticateQuery kc pn = do
 clientQueries :: KeycloakClient -> AuthToken -> Rest.APIQueries ClientID ClientInfo
 clientQueries kc authToken = do
   let APIQueries {..} = mkApiQueries
-      AuthenticatedAPIQueries {..} = mkAuthenticatedAPI authToken
-  mkAdminAPI $ realm kc
+      RealmAPIQueries {..} = mkRealmAPI authToken
+      ClientAPIQueries {..} = mkClientsAPI $ realm kc
+  mkAdminAPI
+
+secretQueries :: KeycloakClient -> AuthToken -> ClientAPIQueries
+secretQueries kc authToken = do
+  let APIQueries {..} = mkApiQueries
+      RealmAPIQueries {..} = mkRealmAPI authToken
+  mkClientsAPI $ realm kc
 
 data AuthToken = AuthToken
   { accessToken :: Text,
@@ -230,10 +240,45 @@ instance ToJSON ProtocolConfig where
           }
       )
 
+data ClientSecret = ClientSecret
+  { secretType :: Text,
+    secretValue :: Secret
+  }
+  deriving (Generic)
+
+instance ToJSON ClientSecret where
+  toJSON =
+    Aeson.genericToJSON
+      ( Aeson.defaultOptions
+          { Aeson.fieldLabelModifier = removePrefix "secret",
+            Aeson.omitNothingFields = True
+          }
+      )
+
+instance FromJSON ClientSecret where
+  parseJSON =
+    Aeson.genericParseJSON
+      ( Aeson.defaultOptions
+          { Aeson.fieldLabelModifier = removePrefix "secret"
+          }
+      )
+
+newtype Secret = Secret Text
+  deriving (Generic)
+
+instance FromJSON Secret
+
+instance ToJSON Secret
+
 type API =
   AuthAPI
     :<|> S.Header "Authorization" AuthToken
-    :> AdminAPI
+    :> RealmAPI
+
+data APIQueries = APIQueries
+  { requestAuthToken :: Realm -> ProtocolName -> TokenRequest -> SC.ClientM AuthToken,
+    mkRealmAPI :: AuthToken -> RealmAPIQueries
+  }
 
 type AuthAPI =
   "realms"
@@ -244,26 +289,26 @@ type AuthAPI =
     :> S.ReqBody '[S.FormUrlEncoded] TokenRequest
     :> S.Post '[S.JSON] AuthToken
 
-data APIQueries = APIQueries
-  { requestAuthToken :: Realm -> ProtocolName -> TokenRequest -> SC.ClientM AuthToken,
-    mkAuthenticatedAPI :: AuthToken -> AuthenticatedAPIQueries
-  }
-
-type AdminAPI =
+type RealmAPI =
   "admin"
     :> "realms"
     :> S.Capture "realm" Realm
     :> "clients"
-    :> ( Rest.API (S.QueryParam "clientId" ClientID) ClientInfo
-    -- :<|> S.Capture "resourceId" ResourceID
-    --   :> "protocol-mappers"
-    --   :> "models"
-    --   :> S.ReqBody '[S.JSON] Protocol
-    --   :> S.Post '[S.JSON] S.NoContent
+    :> ( ClientAPI
+           :<|> SecretAPI
        )
 
-newtype AuthenticatedAPIQueries = AuthenticatedAPIQueries
-  { mkAdminAPI :: Realm -> Rest.APIQueries ClientID ClientInfo
+newtype RealmAPIQueries = RealmAPIQueries
+  { mkClientsAPI :: Realm -> ClientAPIQueries
+  }
+
+type ClientAPI = Rest.API (S.QueryParam "clientId" ClientID) ClientInfo
+
+type SecretAPI = S.Capture "resourceID" Rest.ResourceID :> "client-secret" :> S.Get '[S.JSON] ClientSecret
+
+data ClientAPIQueries = ClientAPIQueries
+  { mkAdminAPI :: Rest.APIQueries ClientID ClientInfo,
+    getSecret :: Rest.ResourceID -> SC.ClientM Secret
   }
 
 mkApiQueries :: APIQueries
@@ -271,13 +316,19 @@ mkApiQueries = APIQueries {..}
   where
     client = SC.client (Proxy :: Proxy API)
 
-    requestAuthToken :<|> authenticatedAPI = client
+    requestAuthToken :<|> realmAPI = client
 
-    mkAuthenticatedAPI authToken = AuthenticatedAPIQueries {..}
+    mkRealmAPI authToken = RealmAPIQueries {..}
       where
-        adminAPI = authenticatedAPI (Just authToken)
+        clientsAPI = realmAPI (Just authToken)
 
-        mkAdminAPI realm = Rest.mkAPIQueries (adminAPI realm)
+        mkClientsAPI realm = ClientAPIQueries {..}
+          where
+            adminAPI :<|> getSecret' = clientsAPI realm
+
+            mkAdminAPI = Rest.mkAPIQueries adminAPI
+
+            getSecret = fmap secretValue . getSecret'
 
 -- | The error returned by Keycloak.
 data Error

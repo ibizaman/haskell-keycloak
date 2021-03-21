@@ -148,6 +148,38 @@ main =
                 >>= \case
                   Left err' -> displayErr $ Keycloak.parseError err'
                   Right _ -> return ()
+    command endpoint auth (Args.ShowSecret realm clientIdentifier) = do
+      let kc = Keycloak.mkClient auth (Keycloak.Realm "master")
+      run' endpoint (Keycloak.authenticateQuery kc Keycloak.OpenidConnect)
+        >>= \case
+          Left err -> displayErr $ Keycloak.parseError err
+          Right token -> do
+            let kc' = Keycloak.mkClient auth realm
+            ( case clientIdentifier of
+                Args.ClientID clientID ->
+                  run'
+                    endpoint
+                    ( Rest.getByName (Keycloak.clientQueries kc' token) clientID
+                        >>= ( \Rest.WithResourceID {resourceID} ->
+                                Keycloak.getSecret
+                                  (Keycloak.secretQueries kc' token)
+                                  resourceID
+                            )
+                    )
+                    >>= either
+                      (displayErr . Keycloak.parseError)
+                      (BS.putStrLn . AesonP.encodePretty)
+                Args.ResourceID resourceID ->
+                  run'
+                    endpoint
+                    ( Keycloak.getSecret
+                        (Keycloak.secretQueries kc' token)
+                        resourceID
+                    )
+                    >>= either
+                      (displayErr . Keycloak.parseError)
+                      (BS.putStrLn . AesonP.encodePretty)
+              )
 
 display :: Show a => Either SC.ClientError a -> IO ()
 display (Left err) = displayErr $ Keycloak.parseError err
