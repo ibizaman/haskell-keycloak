@@ -10,6 +10,7 @@
 module Keycloak
   ( ClientID (..),
     AuthCredentials (..),
+    AuthToken,
     Realm (..),
     ProtocolName (..),
     KeycloakClient (..),
