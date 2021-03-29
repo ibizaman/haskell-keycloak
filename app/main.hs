@@ -8,10 +8,10 @@ module Main
 where
 
 import qualified Args
--- import qualified ConfigFile
 import Control.Applicative (Alternative ((<|>)))
 import Control.Monad
-  ( forM_,
+  ( forM,
+    forM_,
     when,
   )
 import qualified Data.Aeson.Encode.Pretty as AesonP
@@ -98,7 +98,7 @@ main =
         endpoint
         ( Keycloak.authenticateQuery kc Keycloak.OpenidConnect >>= \token -> do
             let kc' = Keycloak.mkClient auth realm
-            forM_ clientIDs $ \c ->
+            forM clientIDs $ \c ->
               getClientResourceID kc' token c
                 >>= Rest.get (Keycloak.clientQueries kc' token)
         )
@@ -111,7 +111,7 @@ main =
         endpoint
         ( Keycloak.authenticateQuery kc Keycloak.OpenidConnect >>= \token -> do
             let kc' = Keycloak.mkClient auth realm
-            forM_ clientIDs $ \c ->
+            forM clientIDs $ \c ->
               getClientResourceID kc' token c
                 >>= Rest.delete (Keycloak.clientQueries kc' token)
         )
@@ -128,6 +128,70 @@ main =
         >>= either
           (displayErr . Keycloak.parseError)
           (BS.putStrLn . AesonP.encodePretty)
+    command endpoint auth (Args.CreateProtocol realm clientIdentifier protocolMapper) =
+      do
+        let kc = Keycloak.mkClient auth (Keycloak.Realm "master")
+        run'
+          endpoint
+          ( Keycloak.authenticateQuery kc Keycloak.OpenidConnect >>= \token -> do
+              let kc' = Keycloak.mkClient auth realm
+              getClientResourceID kc' token clientIdentifier >>= \clientID ->
+                Rest.create
+                  (Keycloak.protocolMapperQueries kc' token clientID)
+                  protocolMapper
+          )
+          >>= either (displayErr . Keycloak.parseError) print
+    command endpoint auth (Args.ListProtocols realm clientIdentifier) = do
+      let kc = Keycloak.mkClient auth (Keycloak.Realm "master")
+      run'
+        endpoint
+        ( Keycloak.authenticateQuery kc Keycloak.OpenidConnect >>= \token -> do
+            let kc' = Keycloak.mkClient auth realm
+            getClientResourceID kc' token clientIdentifier
+              >>= Rest.list
+                . Keycloak.protocolMapperQueries kc' token
+        )
+        >>= \case
+          Left err' -> displayErr $ Keycloak.parseError err'
+          Right cis ->
+            forM_ cis $
+              putStrLn . \protocol ->
+                T.unpack (Rest.unResourceID (Rest.resourceID protocol))
+                  <> " "
+                  <> show (Keycloak.pName (Rest.resourceInfo protocol))
+    command endpoint auth (Args.ShowProtocol realm clientIdentifier protocolIDs) =
+      do
+        let kc = Keycloak.mkClient auth (Keycloak.Realm "master")
+        run'
+          endpoint
+          ( Keycloak.authenticateQuery kc Keycloak.OpenidConnect >>= \token -> do
+              let kc' = Keycloak.mkClient auth realm
+              getClientResourceID kc' token clientIdentifier >>= \clientID ->
+                forM protocolIDs $ \p ->
+                  getProtocolMapperResourceID kc' token clientID p
+                    >>= Rest.get
+                      (Keycloak.protocolMapperQueries kc' token clientID)
+          )
+        >>= either
+          (displayErr . Keycloak.parseError)
+          (BS.putStrLn . AesonP.encodePretty)
+    command endpoint auth (Args.DeleteProtocol realm clientIdentifier protocolIDs) =
+      do
+        let kc = Keycloak.mkClient auth (Keycloak.Realm "master")
+        run'
+          endpoint
+          ( Keycloak.authenticateQuery kc Keycloak.OpenidConnect >>= \token -> do
+              let kc' = Keycloak.mkClient auth realm
+              getClientResourceID kc' token clientIdentifier >>= \clientID ->
+                forM protocolIDs $ \p ->
+                  getProtocolMapperResourceID kc' token clientID p
+                    >>= Rest.delete
+                      (Keycloak.protocolMapperQueries kc' token clientID)
+          )
+          >>= either (displayErr . Keycloak.parseError) (\_ -> return ())
+    -- command endpoint auth (Args.ShowProtocol realm clientIdentifier protocolIDs) = do
+    --   let kc = Keycloak.mkClient auth (Keycloak.Realm "master")
+    --   run' endpoint (Keycloak.authenticateQuery kc Keycloak.OpenidConnect)
 
     getClientResourceID ::
       Keycloak.KeycloakClient ->
@@ -138,6 +202,20 @@ main =
       Args.ResourceID resourceID -> return resourceID
       Args.ClientID clientID ->
         Rest.getByName (Keycloak.clientQueries kc' token) clientID
+          >>= \Rest.WithResourceID {resourceID} -> return resourceID
+
+    getProtocolMapperResourceID ::
+      Keycloak.KeycloakClient ->
+      Keycloak.AuthToken ->
+      Rest.ResourceID ->
+      Args.ProtocolMapperIdentifier ->
+      SC.ClientM Rest.ResourceID
+    getProtocolMapperResourceID kc' token clientID = \case
+      Args.ProtocolResourceID resourceID -> return resourceID
+      Args.ProtocolName protocolName ->
+        Rest.getByName
+          (Keycloak.protocolMapperQueries kc' token clientID)
+          protocolName
           >>= \Rest.WithResourceID {resourceID} -> return resourceID
 
 display :: Show a => Either SC.ClientError a -> IO ()

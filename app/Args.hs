@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE LambdaCase #-}
 
 -- |
 module Args
@@ -10,6 +11,7 @@ module Args
     ServerIP (..),
     Subdomain (..),
     ClientIdentifier (..),
+    ProtocolMapperIdentifier (..),
     getArgs,
   )
 where
@@ -59,8 +61,12 @@ data ServerIP = ServerIP Server IP
 newtype Subdomain = Subdomain {unSubdomain :: Text}
 
 data ClientIdentifier
-  = ClientID Keycloak.ClientID
+  = ClientID Text
   | ResourceID Rest.ResourceID
+
+data ProtocolMapperIdentifier
+  = ProtocolName Keycloak.ProtocolName
+  | ProtocolResourceID Rest.ResourceID
 
 data Command
   = Authenticate
@@ -69,6 +75,10 @@ data Command
   | ShowClient Keycloak.Realm (NonEmpty ClientIdentifier)
   | DeleteClient Keycloak.Realm (NonEmpty ClientIdentifier)
   | ShowSecret Keycloak.Realm ClientIdentifier
+  | CreateProtocol Keycloak.Realm ClientIdentifier Keycloak.ProtocolMapper
+  | ListProtocols Keycloak.Realm ClientIdentifier
+  | ShowProtocol Keycloak.Realm ClientIdentifier (NonEmpty ProtocolMapperIdentifier)
+  | DeleteProtocol Keycloak.Realm ClientIdentifier (NonEmpty ProtocolMapperIdentifier)
 
 argsParser :: Opts.Parser Args
 argsParser =
@@ -82,11 +92,17 @@ argsParser =
           )
           <> Opts.command
             "client"
-            (Opts.info clientParser (Opts.progDesc "Manage clients"))
+            (Opts.info clientsParser (Opts.progDesc "Manage clients"))
+          <> Opts.command
+            "protocolmapper"
+            ( Opts.info
+                protocolMappersParser
+                (Opts.progDesc "Manage protocol mappers for clients")
+            )
       )
 
-clientParser :: Opts.Parser Command
-clientParser =
+clientsParser :: Opts.Parser Command
+clientsParser =
   Opts.hsubparser
     ( Opts.command
         "create"
@@ -118,13 +134,54 @@ clientParser =
           )
     )
 
+protocolMappersParser :: Opts.Parser Command
+protocolMappersParser =
+  Opts.hsubparser
+    ( Opts.command
+        "create"
+        ( Opts.info
+            ( CreateProtocol
+                <$> realmParser
+                <*> clientIdentifierParser
+                <*> protocolMapperParser
+            )
+            (Opts.progDesc "Create a protocol mapper")
+        )
+        <> Opts.command
+          "list"
+          ( Opts.info
+              (ListProtocols <$> realmParser <*> clientIdentifierParser)
+              (Opts.progDesc "List protocol mappers")
+          )
+        <> Opts.command
+          "show"
+          ( Opts.info
+              ( ShowProtocol
+                  <$> realmParser
+                  <*> clientIdentifierParser
+                  <*> some1 protocolMapperIdentifierParser
+              )
+              (Opts.progDesc "Show a protocol mapper")
+          )
+        <> Opts.command
+          "delete"
+          ( Opts.info
+              ( DeleteProtocol
+                  <$> realmParser
+                  <*> clientIdentifierParser
+                  <*> some1 protocolMapperIdentifierParser
+              )
+              (Opts.progDesc "Delete a protocol mapper")
+          )
+    )
+
 clientIdentifierParser :: Opts.Parser ClientIdentifier
 clientIdentifierParser =
   Opts.option
     (ResourceID . Rest.ResourceID <$> Opts.str)
     (Opts.long "id" <> Opts.metavar "RESOURCEID")
     <|> Opts.option
-      (ClientID . Keycloak.ClientID <$> Opts.str)
+      (ClientID <$> Opts.str)
       (Opts.long "clientid" <> Opts.metavar "CLIENTID")
 
 realmParser :: Opts.Parser Keycloak.Realm
@@ -133,7 +190,35 @@ realmParser =
     (Keycloak.Realm <$> Opts.str)
     (Opts.long "realm" <> Opts.metavar "REALM")
 
+protocolMapperIdentifierParser :: Opts.Parser ProtocolMapperIdentifier
+protocolMapperIdentifierParser =
+  Opts.option
+    (ProtocolResourceID . Rest.ResourceID <$> Opts.str)
+    (Opts.long "id" <> Opts.metavar "RESOURCEID")
+    <|> Opts.option
+      (ProtocolName . Keycloak.ProtocolName <$> Opts.str)
+      (Opts.long "name" <> Opts.metavar "PROTOCOLNAME")
+
 instance OptGen.ParseRecord Keycloak.ClientInfo
+
+instance OptGen.ParseRecord Keycloak.ProtocolName
+
+instance OptGen.ParseFields Keycloak.ProtocolName
+
+instance OptGen.ParseField Keycloak.ProtocolName where
+  readField = Opts.maybeReader (Just . Keycloak.ProtocolName . T.pack)
+
+instance OptGen.ParseRecord Keycloak.ProtocolType
+
+instance OptGen.ParseFields Keycloak.ProtocolType
+
+instance OptGen.ParseField Keycloak.ProtocolType where
+  readField =
+    Opts.eitherReader
+      ( \case
+          "openid-connect" -> Right Keycloak.OpenidConnect
+          t -> Left $ "Unkown protocol " <> t
+      )
 
 instance OptGen.ParseField (Map String String) where
   readField =
@@ -186,6 +271,25 @@ clientInfoParser =
         { OptGen.fieldNameModifier = fmap toLower . drop (length ("ci" :: String))
         }
     )
+
+protocolMapperParser :: Opts.Parser Keycloak.ProtocolMapper
+protocolMapperParser =
+  Keycloak.ProtocolMapper
+    <$> Opts.option
+      (Keycloak.ProtocolName <$> Opts.str)
+      (Opts.long "name" <> Opts.metavar "STRING")
+    <*> pure Keycloak.OpenidConnect
+    <*> Opts.option
+      Opts.str
+      (Opts.long "protocolmapper" <> Opts.metavar "STRING")
+    <*> Opts.switch (Opts.long "consentrequired")
+    <*> OptGen.parseRecordWithModifiers
+      ( OptGen.defaultModifiers
+          { OptGen.fieldNameModifier =
+              fmap toLower
+                . drop (length ("p" :: String))
+          }
+      )
 
 getArgs :: IO Args
 getArgs = Opts.customExecParser p opts

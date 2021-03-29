@@ -12,7 +12,6 @@ module Keycloak
     AuthCredentials (..),
     AuthToken,
     Realm (..),
-    ProtocolName (..),
     KeycloakClient (..),
     mkClient,
     authenticateQuery,
@@ -21,6 +20,11 @@ module Keycloak
     secretQueries,
     ClientAPIQueries (getSecret),
     ClientInfo (..),
+    ProtocolMapper (..),
+    ProtocolName (..),
+    ProtocolType (..),
+    ProtocolConfig (..),
+    protocolMapperQueries,
     Error (..),
     Status (..),
     KeycloakError (..),
@@ -78,7 +82,7 @@ mkClient apiAuth realm =
       token = Nothing
     }
 
-authenticateQuery :: KeycloakClient -> ProtocolName -> SC.ClientM AuthToken
+authenticateQuery :: KeycloakClient -> ProtocolType -> SC.ClientM AuthToken
 authenticateQuery kc pn = do
   let APIQueries {..} = mkApiQueries
   requestAuthToken (realm kc) pn (mkTokenRequest $ apiAuth kc)
@@ -91,7 +95,7 @@ authenticateQuery kc pn = do
           trClientId = unClientID clientId
         }
 
-clientQueries :: KeycloakClient -> AuthToken -> Rest.APIQueries ClientID ClientInfo
+clientQueries :: KeycloakClient -> AuthToken -> Rest.APIQueries Text ClientInfo
 clientQueries kc authToken = do
   let APIQueries {..} = mkApiQueries
       RealmAPIQueries {..} = mkRealmAPI authToken
@@ -103,6 +107,13 @@ secretQueries kc authToken = do
   let APIQueries {..} = mkApiQueries
       RealmAPIQueries {..} = mkRealmAPI authToken
   mkClientsAPI $ realm kc
+
+protocolMapperQueries :: KeycloakClient -> AuthToken -> Rest.ResourceID -> Rest.APIQueries ProtocolName ProtocolMapper
+protocolMapperQueries kc authToken clientId = do
+  let APIQueries {..} = mkApiQueries
+      RealmAPIQueries {..} = mkRealmAPI authToken
+      ClientAPIQueries {..} = mkClientsAPI $ realm kc
+  mkProtocolMappersAPI clientId
 
 data AuthToken = AuthToken
   { accessToken :: Text,
@@ -170,7 +181,6 @@ data ClientInfo = ClientInfo
     ciOptionalClientScopes :: Maybe [Text],
     ciOrigin :: Maybe Text,
     ciProtocol :: Maybe Text,
-    -- ciProtocolMappers :: Maybe [ProtocolMapperRepresentation]
     ciPublicClient :: Maybe Bool,
     ciRedirectUris :: Maybe [Text],
     ciRegisteredNodes :: Maybe (Map String String),
@@ -201,35 +211,68 @@ instance FromJSON ClientInfo where
           }
       )
 
-data ProtocolName = OpenidConnect
+data ProtocolType = OpenidConnect
+  deriving (Generic)
 
-instance S.ToHttpApiData ProtocolName where
-  toUrlPiece OpenidConnect = "openid-connect"
-
-instance ToJSON ProtocolName where
+instance ToJSON ProtocolType where
   toJSON OpenidConnect = "openid-connect"
 
-data Protocol = Protocol
-  { pName :: Text,
-    pProtocol :: ProtocolName,
+instance FromJSON ProtocolType where
+  parseJSON =
+    Aeson.withText
+      "protocolName"
+      ( \case
+          "openid-connect" -> pure OpenidConnect
+          t -> fail $ "Unkown protocol " <> T.unpack t
+      )
+
+instance S.ToHttpApiData ProtocolType where
+  toUrlPiece OpenidConnect = "openid-connect"
+
+newtype ProtocolName = ProtocolName Text
+  deriving (Eq, Generic)
+
+instance Show ProtocolName where
+  show (ProtocolName p) = T.unpack p
+
+instance ToJSON ProtocolName
+
+instance FromJSON ProtocolName
+
+instance S.ToHttpApiData ProtocolName where
+  toUrlPiece (ProtocolName n) = n
+
+data ProtocolMapper = ProtocolMapper
+  { pName :: ProtocolName,
+    pProtocol :: ProtocolType,
     pProtocolMapper :: Text,
     pConsentRequired :: Bool,
     pConfig :: ProtocolConfig
   }
   deriving (Generic)
 
-instance ToJSON Protocol where
+instance ToJSON ProtocolMapper where
   toJSON =
     Aeson.genericToJSON
       ( Aeson.defaultOptions
-          { Aeson.fieldLabelModifier = removePrefix "c"
+          { Aeson.fieldLabelModifier = removePrefix "p"
+          }
+      )
+
+instance FromJSON ProtocolMapper where
+  parseJSON =
+    Aeson.genericParseJSON
+      ( Aeson.defaultOptions
+          { Aeson.fieldLabelModifier = removePrefix "p"
           }
       )
 
 data ProtocolConfig = ProtocolConfig
-  { p_included_client_audience :: Text,
-    p_id_token_claim :: Bool,
-    p_access_token_claim :: Bool
+  { pIncluded_client_audience :: Maybe Text,
+    pId_token_claim :: Maybe Text,
+    pClaim_name :: Maybe Text,
+    pJsonType_label :: Maybe Text,
+    pAccess_token_claim :: Maybe Text
   }
   deriving (Generic)
 
@@ -237,7 +280,15 @@ instance ToJSON ProtocolConfig where
   toJSON =
     Aeson.genericToJSON
       ( Aeson.defaultOptions
-          { Aeson.fieldLabelModifier = replaceChar '_' '.' . removePrefix "p_"
+          { Aeson.fieldLabelModifier = replaceChar '_' '.' . removePrefix "p"
+          }
+      )
+
+instance FromJSON ProtocolConfig where
+  parseJSON =
+    Aeson.genericParseJSON
+      ( Aeson.defaultOptions
+          { Aeson.fieldLabelModifier = replaceChar '_' '.' . removePrefix "p"
           }
       )
 
@@ -277,7 +328,7 @@ type API =
     :> RealmAPI
 
 data APIQueries = APIQueries
-  { requestAuthToken :: Realm -> ProtocolName -> TokenRequest -> SC.ClientM AuthToken,
+  { requestAuthToken :: Realm -> ProtocolType -> TokenRequest -> SC.ClientM AuthToken,
     mkRealmAPI :: AuthToken -> RealmAPIQueries
   }
 
@@ -285,7 +336,7 @@ type AuthAPI =
   "realms"
     :> S.Capture "realm" Realm
     :> "protocol"
-    :> S.Capture "protocolName" ProtocolName
+    :> S.Capture "protocolType" ProtocolType
     :> "token"
     :> S.ReqBody '[S.FormUrlEncoded] TokenRequest
     :> S.Post '[S.JSON] AuthToken
@@ -297,19 +348,26 @@ type RealmAPI =
     :> "clients"
     :> ( ClientAPI
            :<|> SecretAPI
+           :<|> ProtocolMapperAPI
        )
 
 newtype RealmAPIQueries = RealmAPIQueries
   { mkClientsAPI :: Realm -> ClientAPIQueries
   }
 
-type ClientAPI = Rest.API (S.QueryParam "clientId" ClientID) ClientInfo
+type ClientAPI = Rest.API (S.QueryParam "clientId" Text) ClientInfo
 
 type SecretAPI = S.Capture "resourceID" Rest.ResourceID :> "client-secret" :> S.Get '[S.JSON] ClientSecret
 
+type ProtocolMapperAPI =
+  S.Capture "resourceID" Rest.ResourceID :> "protocol-mappers"
+    :> "models"
+    :> Rest.API (S.QueryParam "name" ProtocolName) ProtocolMapper
+
 data ClientAPIQueries = ClientAPIQueries
-  { mkAdminAPI :: Rest.APIQueries ClientID ClientInfo,
-    getSecret :: Rest.ResourceID -> SC.ClientM Secret
+  { mkAdminAPI :: Rest.APIQueries Text ClientInfo,
+    getSecret :: Rest.ResourceID -> SC.ClientM Secret,
+    mkProtocolMappersAPI :: Rest.ResourceID -> Rest.APIQueries ProtocolName ProtocolMapper
   }
 
 mkApiQueries :: APIQueries
@@ -325,11 +383,13 @@ mkApiQueries = APIQueries {..}
 
         mkClientsAPI realm = ClientAPIQueries {..}
           where
-            adminAPI :<|> getSecret' = clientsAPI realm
+            adminAPI :<|> getSecret' :<|> protocolMappersAPI = clientsAPI realm
 
-            mkAdminAPI = Rest.mkAPIQueries adminAPI
+            mkAdminAPI = Rest.mkAPIQueries adminAPI ciClientId
 
             getSecret = fmap secretValue . getSecret'
+
+            mkProtocolMappersAPI resourceID = Rest.mkAPIQueries (protocolMappersAPI resourceID) pName
 
 -- | The error returned by Keycloak.
 data Error

@@ -114,13 +114,15 @@ instance Show UndecodableHeader where
 instance Exception UndecodableHeader
 
 mkAPIQueries ::
+  (Eq name) =>
   (Maybe name -> SC.ClientM [WithResourceID t])
     :<|> (t -> SC.ClientM (S.Headers '[S.Header "Location" ResourceID] S.NoContent))
     :<|> (ResourceID -> WithResourceID t -> SC.ClientM S.NoContent)
     :<|> (ResourceID -> SC.ClientM (WithResourceID t))
     :<|> (ResourceID -> SC.ClientM S.NoContent) ->
+  (t -> name) ->
   APIQueries name t
-mkAPIQueries api =
+mkAPIQueries api nameFilter =
   APIQueries {..}
   where
     listClients' :<|> createClient' :<|> update :<|> get :<|> delete = api
@@ -135,10 +137,13 @@ mkAPIQueries api =
     list = listClients' Nothing
 
     getByName name =
-      listClients' (Just name) >>= \case
-        [x] -> return x
-        [] -> throwM NoItemFound
-        _ -> throwM TooManyItemsFound
+      listClients' (Just name)
+        >>= ( \case
+                [x] -> return x
+                [] -> throwM NoItemFound
+                _ -> throwM TooManyItemsFound
+            )
+          . filter (\v -> nameFilter (resourceInfo v) == name)
     deleteByName name = getByName name >>= (delete . resourceID)
 
 data APIQueries name t = APIQueries
