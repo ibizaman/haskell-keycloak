@@ -1,4 +1,4 @@
-# Haskell Godaddy
+# Haskell Keycloack
 
 This project is a command-line interface to configure a Keycloak
 instance.
@@ -17,7 +17,7 @@ executable linked to the default linux linker.
 ```bash
 $ nix-build
 
-# Executable is in ./result/bin/haskell-godaddy-exe
+# Executable is in ./result/bin/haskell-keycloak-exe
 ```
 
 ### Using stack
