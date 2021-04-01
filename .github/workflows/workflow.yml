@@ -30,5 +30,5 @@ jobs:
             - run: make build-release
             - uses: actions/upload-artifact@v2
               with:
-                  name: godaddy
-                  path: godaddy
+                  name: keycloak
+                  path: keycloak
