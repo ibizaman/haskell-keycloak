@@ -1,6 +1,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE TupleSections #-}
 
 module Main
   ( main,
@@ -189,9 +190,112 @@ main =
                       (Keycloak.protocolMapperQueries kc' token clientID)
           )
           >>= either (displayErr . Keycloak.parseError) (\_ -> return ())
-    -- command endpoint auth (Args.ShowProtocol realm clientIdentifier protocolIDs) = do
-    --   let kc = Keycloak.mkClient auth (Keycloak.Realm "master")
-    --   run' endpoint (Keycloak.authenticateQuery kc Keycloak.OpenidConnect)
+    command endpoint auth (Args.ListUsers realm) = do
+      let kc = Keycloak.mkClient auth (Keycloak.Realm "master")
+      run'
+        endpoint
+        ( Keycloak.authenticateQuery kc Keycloak.OpenidConnect >>= \token -> do
+            let kc' = Keycloak.mkClient auth realm
+            Rest.list (Keycloak.userQueries kc' token)
+        )
+        >>= \case
+          Left err' -> displayErr $ Keycloak.parseError err'
+          Right cis ->
+            forM_ cis $
+              putStrLn . \ciwr ->
+                T.unpack (Rest.unResourceID (Rest.resourceID ciwr))
+                  <> " "
+                  <> T.unpack (Keycloak.uUsername (Rest.resourceInfo ciwr))
+    command endpoint auth (Args.ShowUser realm userIDs) = do
+      let kc = Keycloak.mkClient auth (Keycloak.Realm "master")
+      run'
+        endpoint
+        ( Keycloak.authenticateQuery kc Keycloak.OpenidConnect >>= \token -> do
+            let kc' = Keycloak.mkClient auth realm
+            forM userIDs $ \u ->
+              getUserResourceID kc' token u
+                >>= Rest.get (Keycloak.userQueries kc' token)
+        )
+        >>= either
+          (displayErr . Keycloak.parseError)
+          (BS.putStrLn . AesonP.encodePretty)
+    command endpoint auth (Args.ListRoleMappings realm userID clientID) = do
+      let kc = Keycloak.mkClient auth (Keycloak.Realm "master")
+      run'
+        endpoint
+        ( Keycloak.authenticateQuery kc Keycloak.OpenidConnect >>= \token -> do
+            let kc' = Keycloak.mkClient auth realm
+            getUserResourceID kc' token userID >>= \userID' ->
+              getClientResourceID kc' token clientID >>= \clientID' -> do
+                let queries =
+                      Keycloak.roleMappingQueries kc' token userID' clientID'
+                used <- Keycloak.list queries
+                available <- Keycloak.listAvailable queries
+                return $ map (True,) used ++ map (False,) available
+        )
+        >>= \case
+          Left err' -> displayErr $ Keycloak.parseError err'
+          Right cis ->
+            forM_ cis $
+              putStrLn . \(used, rm) ->
+                T.unpack (Rest.unResourceID (Rest.resourceID rm))
+                  <> " "
+                  <> (if used then "[used]     " else "[available]")
+                  <> " "
+                  <> T.unpack (Keycloak.rmName (Rest.resourceInfo rm))
+    command endpoint auth (Args.ShowRoleMappings realm userID clientID rmIDs) =
+      do
+        let kc = Keycloak.mkClient auth (Keycloak.Realm "master")
+        run'
+          endpoint
+          ( Keycloak.authenticateQuery kc Keycloak.OpenidConnect >>= \token -> do
+              let kc' = Keycloak.mkClient auth realm
+              getUserResourceID kc' token userID >>= \userID' ->
+                getClientResourceID kc' token clientID >>= \clientID' ->
+                  forM rmIDs $ \rmID ->
+                    getRoleMappingResourceID kc' token userID' clientID' rmID
+                      >>= Keycloak.get
+                        ( Keycloak.roleMappingQueries kc' token userID' clientID'
+                        )
+          )
+        >>= either
+          (displayErr . Keycloak.parseError)
+          (BS.putStrLn . AesonP.encodePretty)
+    command endpoint auth (Args.AddRoleMapping realm userID clientID rmIDs) = do
+      let kc = Keycloak.mkClient auth (Keycloak.Realm "master")
+      run'
+        endpoint
+        ( Keycloak.authenticateQuery kc Keycloak.OpenidConnect >>= \token -> do
+            let kc' = Keycloak.mkClient auth realm
+            getUserResourceID kc' token userID >>= \userID' ->
+              getClientResourceID kc' token clientID >>= \clientID' ->
+                forM rmIDs $ \rmID ->
+                  getRoleMappingResourceID kc' token userID' clientID' rmID
+                    >>= Keycloak.add
+                      ( Keycloak.roleMappingQueries kc' token userID' clientID'
+                      )
+        )
+        >>= either (displayErr . Keycloak.parseError) (\_ -> return ())
+    command endpoint auth (Args.DeleteRoleMapping realm userID clientID rmIDs) =
+      do
+        let kc = Keycloak.mkClient auth (Keycloak.Realm "master")
+        run'
+          endpoint
+          ( Keycloak.authenticateQuery kc Keycloak.OpenidConnect >>= \token -> do
+              let kc' = Keycloak.mkClient auth realm
+              getUserResourceID kc' token userID >>= \userID' ->
+                getClientResourceID kc' token clientID >>= \clientID' ->
+                  forM rmIDs $ \rmID ->
+                    getRoleMappingResourceID kc' token userID' clientID' rmID
+                      >>= Keycloak.delete
+                        ( Keycloak.roleMappingQueries
+                            kc'
+                            token
+                            userID'
+                            clientID'
+                        )
+          )
+          >>= either (displayErr . Keycloak.parseError) (\_ -> return ())
 
     getClientResourceID ::
       Keycloak.KeycloakClient ->
@@ -216,6 +320,32 @@ main =
         Rest.getByName
           (Keycloak.protocolMapperQueries kc' token clientID)
           protocolName
+          >>= \Rest.WithResourceID {resourceID} -> return resourceID
+
+    getUserResourceID ::
+      Keycloak.KeycloakClient ->
+      Keycloak.AuthToken ->
+      Args.UserIdentifier ->
+      SC.ClientM Rest.ResourceID
+    getUserResourceID kc' token = \case
+      Args.UserResourceID resourceID -> return resourceID
+      Args.UserID userID ->
+        Rest.getByName (Keycloak.userQueries kc' token) userID
+          >>= \Rest.WithResourceID {resourceID} -> return resourceID
+
+    getRoleMappingResourceID ::
+      Keycloak.KeycloakClient ->
+      Keycloak.AuthToken ->
+      Rest.ResourceID ->
+      Rest.ResourceID ->
+      Args.RoleMappingIdentifier ->
+      SC.ClientM Rest.ResourceID
+    getRoleMappingResourceID kc' token userID clientID = \case
+      Args.RoleMappingResourceID resourceID -> return resourceID
+      Args.RoleMappingID rmID ->
+        Keycloak.getByName
+          (Keycloak.roleMappingQueries kc' token userID clientID)
+          rmID
           >>= \Rest.WithResourceID {resourceID} -> return resourceID
 
 display :: Show a => Either SC.ClientError a -> IO ()

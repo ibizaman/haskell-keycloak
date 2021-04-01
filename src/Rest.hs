@@ -11,6 +11,8 @@ module Rest
     WithResourceID (..),
     API,
     APIQueries (..),
+    NoItemFound (..),
+    TooManyItemsFound (..),
     mkAPIQueries,
   )
 where
@@ -32,7 +34,7 @@ import qualified Servant as S
 import qualified Servant.Client as SC
 
 newtype ResourceID = ResourceID {unResourceID :: Text}
-  deriving (Generic)
+  deriving (Eq, Generic)
 
 instance Show ResourceID where
   show = T.unpack . unResourceID
@@ -132,7 +134,7 @@ mkAPIQueries api nameFilter =
         returnResourceID :: S.ResponseHeader "Location" ResourceID -> SC.ClientM ResourceID
         returnResourceID (S.Header resourceID) = return resourceID
         returnResourceID S.MissingHeader = throwM MissingHeader
-        returnResourceID (S.UndecodableHeader bs) = throwM UndecodableHeader
+        returnResourceID (S.UndecodableHeader _) = throwM UndecodableHeader
 
     list = listClients' Nothing
 

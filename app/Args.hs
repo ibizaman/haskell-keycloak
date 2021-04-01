@@ -12,6 +12,8 @@ module Args
     Subdomain (..),
     ClientIdentifier (..),
     ProtocolMapperIdentifier (..),
+    UserIdentifier (..),
+    RoleMappingIdentifier (..),
     getArgs,
   )
 where
@@ -68,6 +70,14 @@ data ProtocolMapperIdentifier
   = ProtocolName Keycloak.ProtocolName
   | ProtocolResourceID Rest.ResourceID
 
+data UserIdentifier
+  = UserID Text
+  | UserResourceID Rest.ResourceID
+
+data RoleMappingIdentifier
+  = RoleMappingID Text
+  | RoleMappingResourceID Rest.ResourceID
+
 data Command
   = Authenticate
   | CreateClient Keycloak.Realm Keycloak.ClientInfo
@@ -79,6 +89,12 @@ data Command
   | ListProtocols Keycloak.Realm ClientIdentifier
   | ShowProtocol Keycloak.Realm ClientIdentifier (NonEmpty ProtocolMapperIdentifier)
   | DeleteProtocol Keycloak.Realm ClientIdentifier (NonEmpty ProtocolMapperIdentifier)
+  | ListUsers Keycloak.Realm
+  | ShowUser Keycloak.Realm (NonEmpty UserIdentifier)
+  | ListRoleMappings Keycloak.Realm UserIdentifier ClientIdentifier
+  | ShowRoleMappings Keycloak.Realm UserIdentifier ClientIdentifier (NonEmpty RoleMappingIdentifier)
+  | AddRoleMapping Keycloak.Realm UserIdentifier ClientIdentifier (NonEmpty RoleMappingIdentifier)
+  | DeleteRoleMapping Keycloak.Realm UserIdentifier ClientIdentifier (NonEmpty RoleMappingIdentifier)
 
 argsParser :: Opts.Parser Args
 argsParser =
@@ -98,6 +114,15 @@ argsParser =
             ( Opts.info
                 protocolMappersParser
                 (Opts.progDesc "Manage protocol mappers for clients")
+            )
+          <> Opts.command
+            "user"
+            (Opts.info usersParser (Opts.progDesc "Manage users"))
+          <> Opts.command
+            "rolemapping"
+            ( Opts.info
+                roleMappingParser
+                (Opts.progDesc "Manage role mappings for users")
             )
       )
 
@@ -175,14 +200,76 @@ protocolMappersParser =
           )
     )
 
+usersParser :: Opts.Parser Command
+usersParser =
+  Opts.hsubparser
+    ( Opts.command
+        "list"
+        (Opts.info (ListUsers <$> realmParser) (Opts.progDesc "List users"))
+        <> Opts.command
+          "show"
+          ( Opts.info
+              (ShowUser <$> realmParser <*> some1 userIdentifierParser)
+              (Opts.progDesc "Show a user")
+          )
+    )
+
+roleMappingParser :: Opts.Parser Command
+roleMappingParser =
+  Opts.hsubparser
+    ( Opts.command
+        "list"
+        ( Opts.info
+            ( ListRoleMappings
+                <$> realmParser
+                <*> userIdentifierParser
+                <*> clientIdentifierParser
+            )
+            (Opts.progDesc "List used and available role mappings for user")
+        )
+        <> Opts.command
+          "show"
+          ( Opts.info
+              ( ShowRoleMappings
+                  <$> realmParser
+                  <*> userIdentifierParser
+                  <*> clientIdentifierParser
+                  <*> some1 roleMappingIdentifierParser
+              )
+              (Opts.progDesc "Show role mapping")
+          )
+        <> Opts.command
+          "add"
+          ( Opts.info
+              ( AddRoleMapping
+                  <$> realmParser
+                  <*> userIdentifierParser
+                  <*> clientIdentifierParser
+                  <*> some1 roleMappingIdentifierParser
+              )
+              (Opts.progDesc "Add role mapping to user")
+          )
+        <> Opts.command
+          "delete"
+          ( Opts.info
+              ( DeleteRoleMapping
+                  <$> realmParser
+                  <*> userIdentifierParser
+                  <*> clientIdentifierParser
+                  <*> some1 roleMappingIdentifierParser
+              )
+              (Opts.progDesc "Remote role mapping from user")
+          )
+    )
+
 clientIdentifierParser :: Opts.Parser ClientIdentifier
 clientIdentifierParser =
   Opts.option
     (ResourceID . Rest.ResourceID <$> Opts.str)
-    (Opts.long "id" <> Opts.metavar "RESOURCEID")
+    (Opts.long "clientid" <> Opts.metavar "RESOURCEID")
     <|> Opts.option
       (ClientID <$> Opts.str)
-      (Opts.long "clientid" <> Opts.metavar "CLIENTID")
+      (Opts.long "clientname" <> Opts.metavar "CLIENTID")
 
 realmParser :: Opts.Parser Keycloak.Realm
 realmParser =
@@ -194,10 +281,28 @@ protocolMapperIdentifierParser :: Opts.Parser ProtocolMapperIdentifier
 protocolMapperIdentifierParser =
   Opts.option
     (ProtocolResourceID . Rest.ResourceID <$> Opts.str)
-    (Opts.long "id" <> Opts.metavar "RESOURCEID")
+    (Opts.long "pid" <> Opts.metavar "RESOURCEID")
     <|> Opts.option
       (ProtocolName . Keycloak.ProtocolName <$> Opts.str)
-      (Opts.long "name" <> Opts.metavar "PROTOCOLNAME")
+      (Opts.long "pname" <> Opts.metavar "PROTOCOLNAME")
+
+userIdentifierParser :: Opts.Parser UserIdentifier
+userIdentifierParser =
+  Opts.option
+    (UserResourceID . Rest.ResourceID <$> Opts.str)
+    (Opts.long "userid" <> Opts.metavar "RESOURCEID")
+    <|> Opts.option
+      (UserID <$> Opts.str)
+      (Opts.long "username" <> Opts.metavar "USERNAME")
+
+roleMappingIdentifierParser :: Opts.Parser RoleMappingIdentifier
+roleMappingIdentifierParser =
+  Opts.option
+    (RoleMappingResourceID . Rest.ResourceID <$> Opts.str)
+    (Opts.long "rmid" <> Opts.metavar "RESOURCEID")
+    <|> Opts.option
+      (RoleMappingID <$> Opts.str)
+      (Opts.long "rmname" <> Opts.metavar "NAME")
 
 instance OptGen.ParseRecord Keycloak.ClientInfo
 

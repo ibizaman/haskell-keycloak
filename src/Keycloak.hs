@@ -25,6 +25,11 @@ module Keycloak
     ProtocolType (..),
     ProtocolConfig (..),
     protocolMapperQueries,
+    User (..),
+    userQueries,
+    RoleMapping (..),
+    UserRoleMappingQueries (..),
+    roleMappingQueries,
     Error (..),
     Status (..),
     KeycloakError (..),
@@ -34,6 +39,7 @@ where
 
 -- https://github.com/keycloak/keycloak-documentation/blob/master/server_admin/topics/admin-cli.adoc
 
+import Control.Monad.Catch (MonadThrow (throwM))
 import Data.Aeson
   ( FromJSON (..),
     ToJSON (..),
@@ -98,22 +104,41 @@ authenticateQuery kc pn = do
 clientQueries :: KeycloakClient -> AuthToken -> Rest.APIQueries Text ClientInfo
 clientQueries kc authToken = do
   let APIQueries {..} = mkApiQueries
-      RealmAPIQueries {..} = mkRealmAPI authToken
-      ClientAPIQueries {..} = mkClientsAPI $ realm kc
+      AuthenticatedAPIQueries {..} = mkAuthenticatedAPI authToken
+      RealmAPIQueries {..} = mkRealmAPI $ realm kc
+      ClientAPIQueries {..} = mkClientsAPI
   mkAdminAPI
 
 secretQueries :: KeycloakClient -> AuthToken -> ClientAPIQueries
 secretQueries kc authToken = do
   let APIQueries {..} = mkApiQueries
-      RealmAPIQueries {..} = mkRealmAPI authToken
-  mkClientsAPI $ realm kc
+      AuthenticatedAPIQueries {..} = mkAuthenticatedAPI authToken
+      RealmAPIQueries {..} = mkRealmAPI $ realm kc
+  mkClientsAPI
 
 protocolMapperQueries :: KeycloakClient -> AuthToken -> Rest.ResourceID -> Rest.APIQueries ProtocolName ProtocolMapper
 protocolMapperQueries kc authToken clientId = do
   let APIQueries {..} = mkApiQueries
-      RealmAPIQueries {..} = mkRealmAPI authToken
-      ClientAPIQueries {..} = mkClientsAPI $ realm kc
+      AuthenticatedAPIQueries {..} = mkAuthenticatedAPI authToken
+      RealmAPIQueries {..} = mkRealmAPI $ realm kc
+      ClientAPIQueries {..} = mkClientsAPI
   mkProtocolMappersAPI clientId
+
+userQueries :: KeycloakClient -> AuthToken -> Rest.APIQueries Text User
+userQueries kc authToken = do
+  let APIQueries {..} = mkApiQueries
+      AuthenticatedAPIQueries {..} = mkAuthenticatedAPI authToken
+      RealmAPIQueries {..} = mkRealmAPI $ realm kc
+      UserAPIQueries {..} = mkUserAPI
+  mkManageUserAPI
+
+roleMappingQueries :: KeycloakClient -> AuthToken -> Rest.ResourceID -> Rest.ResourceID -> UserRoleMappingQueries
+roleMappingQueries kc authToken userId clientId = do
+  let APIQueries {..} = mkApiQueries
+      AuthenticatedAPIQueries {..} = mkAuthenticatedAPI authToken
+      RealmAPIQueries {..} = mkRealmAPI $ realm kc
+      UserAPIQueries {..} = mkUserAPI
+  mkRoleMappingAPI userId clientId
 
 data AuthToken = AuthToken
   { accessToken :: Text,
@@ -322,14 +347,81 @@ instance FromJSON Secret
 
 instance ToJSON Secret
 
+data User = User
+  { uAccess :: Maybe (Map String Bool),
+    uAttributes :: Maybe (Map String String),
+    uClientRoles :: Maybe (Map String String),
+    uCreatedTimestamps :: Maybe Int,
+    uDisableCredentialTypes :: Maybe [Text],
+    uEmail :: Maybe Text,
+    uEmailVerified :: Maybe Bool,
+    uEnabled :: Maybe Bool,
+    uFederationLink :: Maybe Text,
+    uFirstName :: Maybe Text,
+    uGroups :: Maybe [Text],
+    uLastName :: Maybe Text,
+    uNotBefore :: Maybe Int,
+    uOrigin :: Maybe Text,
+    uRealmRoles :: Maybe [Text],
+    uRequiredActions :: Maybe [Text],
+    uSelf :: Maybe Text,
+    uServiceAccountClientId :: Maybe Text,
+    uUsername :: Text
+  }
+  deriving (Generic)
+
+instance ToJSON User where
+  toJSON =
+    Aeson.genericToJSON
+      ( Aeson.defaultOptions
+          { Aeson.fieldLabelModifier = removePrefix "u",
+            Aeson.omitNothingFields = True
+          }
+      )
+
+instance FromJSON User where
+  parseJSON =
+    Aeson.genericParseJSON
+      ( Aeson.defaultOptions
+          { Aeson.fieldLabelModifier = removePrefix "u"
+          }
+      )
+
+data RoleMapping = RoleMapping
+  { rmAttributes :: Maybe (Map Text Text),
+    rmClientRole :: Maybe Bool,
+    rmComposite :: Maybe Bool,
+    rmContainterID :: Maybe Text,
+    rmDescription :: Maybe Text,
+    rmName :: Text
+  }
+  deriving (Generic)
+
+instance FromJSON RoleMapping where
+  parseJSON =
+    Aeson.genericParseJSON
+      ( Aeson.defaultOptions
+          { Aeson.fieldLabelModifier = removePrefix "rm"
+          }
+      )
+
+instance ToJSON RoleMapping where
+  toJSON =
+    Aeson.genericToJSON
+      ( Aeson.defaultOptions
+          { Aeson.fieldLabelModifier = removePrefix "rm",
+            Aeson.omitNothingFields = True
+          }
+      )
+
 type API =
   AuthAPI
     :<|> S.Header "Authorization" AuthToken
-    :> RealmAPI
+    :> AuthenticatedAPI
 
 data APIQueries = APIQueries
   { requestAuthToken :: Realm -> ProtocolType -> TokenRequest -> SC.ClientM AuthToken,
-    mkRealmAPI :: AuthToken -> RealmAPIQueries
+    mkAuthenticatedAPI :: AuthToken -> AuthenticatedAPIQueries
   }
 
 type AuthAPI =
@@ -341,28 +433,59 @@ type AuthAPI =
     :> S.ReqBody '[S.FormUrlEncoded] TokenRequest
     :> S.Post '[S.JSON] AuthToken
 
-type RealmAPI =
+type AuthenticatedAPI =
   "admin"
     :> "realms"
     :> S.Capture "realm" Realm
-    :> "clients"
-    :> ( ClientAPI
-           :<|> SecretAPI
-           :<|> ProtocolMapperAPI
-       )
+    :> RealmAPI
 
-newtype RealmAPIQueries = RealmAPIQueries
-  { mkClientsAPI :: Realm -> ClientAPIQueries
+newtype AuthenticatedAPIQueries = AuthenticatedAPIQueries
+  { mkRealmAPI :: Realm -> RealmAPIQueries
+  }
+
+type RealmAPI =
+  ( "clients"
+      :> ( ClientAPI
+             :<|> SecretAPI
+             :<|> ProtocolMapperAPI
+         )
+  )
+    :<|> ( "users"
+             :> ( UserAPI
+                    :<|> RoleMappingAPI
+                )
+         )
+
+data RealmAPIQueries = RealmAPIQueries
+  { mkClientsAPI :: ClientAPIQueries,
+    mkUserAPI :: UserAPIQueries
   }
 
 type ClientAPI = Rest.API (S.QueryParam "clientId" Text) ClientInfo
 
-type SecretAPI = S.Capture "resourceID" Rest.ResourceID :> "client-secret" :> S.Get '[S.JSON] ClientSecret
+type SecretAPI =
+  S.Capture "resourceID" Rest.ResourceID
+    :> "client-secret"
+    :> S.Get '[S.JSON] ClientSecret
 
 type ProtocolMapperAPI =
-  S.Capture "resourceID" Rest.ResourceID :> "protocol-mappers"
+  S.Capture "resourceID" Rest.ResourceID
+    :> "protocol-mappers"
     :> "models"
     :> Rest.API (S.QueryParam "name" ProtocolName) ProtocolMapper
+
+type UserAPI = Rest.API (S.QueryParam "username" Text) User
+
+type RoleMappingAPI =
+  S.Capture "userID" Rest.ResourceID
+    :> "role-mappings"
+    :> "clients"
+    :> S.Capture "clientID" Rest.ResourceID
+    :> ( S.Get '[S.JSON] [Rest.WithResourceID RoleMapping]
+           :<|> "available" :> S.Get '[S.JSON] [Rest.WithResourceID RoleMapping]
+           :<|> S.ReqBody '[S.JSON] [Rest.WithResourceID RoleMapping] :> S.Post '[S.OctetStream] S.NoContent
+           :<|> S.ReqBody '[S.JSON] [Rest.WithResourceID RoleMapping] :> S.Delete '[S.JSON] S.NoContent
+       )
 
 data ClientAPIQueries = ClientAPIQueries
   { mkAdminAPI :: Rest.APIQueries Text ClientInfo,
@@ -370,26 +493,76 @@ data ClientAPIQueries = ClientAPIQueries
     mkProtocolMappersAPI :: Rest.ResourceID -> Rest.APIQueries ProtocolName ProtocolMapper
   }
 
+data UserAPIQueries = UserAPIQueries
+  { mkManageUserAPI :: Rest.APIQueries Text User,
+    mkRoleMappingAPI :: Rest.ResourceID -> Rest.ResourceID -> UserRoleMappingQueries
+  }
+
+data UserRoleMappingQueries = UserRoleMappingQueries
+  { list :: SC.ClientM [Rest.WithResourceID RoleMapping],
+    listAvailable :: SC.ClientM [Rest.WithResourceID RoleMapping],
+    get :: Rest.ResourceID -> SC.ClientM (Rest.WithResourceID RoleMapping),
+    getByName :: Text -> SC.ClientM (Rest.WithResourceID RoleMapping),
+    add :: Rest.ResourceID -> SC.ClientM S.NoContent,
+    delete :: Rest.ResourceID -> SC.ClientM S.NoContent
+  }
+
 mkApiQueries :: APIQueries
 mkApiQueries = APIQueries {..}
   where
     client = SC.client (Proxy :: Proxy API)
 
-    requestAuthToken :<|> realmAPI = client
+    requestAuthToken :<|> authenticatedAPI = client
 
-    mkRealmAPI authToken = RealmAPIQueries {..}
+    mkAuthenticatedAPI authToken = AuthenticatedAPIQueries {..}
       where
-        clientsAPI = realmAPI (Just authToken)
+        realmAPI = authenticatedAPI (Just authToken)
 
-        mkClientsAPI realm = ClientAPIQueries {..}
+        mkRealmAPI realm = RealmAPIQueries {..}
           where
-            adminAPI :<|> getSecret' :<|> protocolMappersAPI = clientsAPI realm
+            clientsAPI :<|> usersAPI = realmAPI realm
 
-            mkAdminAPI = Rest.mkAPIQueries adminAPI ciClientId
+            mkClientsAPI = ClientAPIQueries {..}
+              where
+                adminAPI :<|> getSecret' :<|> protocolMappersAPI = clientsAPI
 
-            getSecret = fmap secretValue . getSecret'
+                mkAdminAPI = Rest.mkAPIQueries adminAPI ciClientId
 
-            mkProtocolMappersAPI resourceID = Rest.mkAPIQueries (protocolMappersAPI resourceID) pName
+                getSecret = fmap secretValue . getSecret'
+
+                mkProtocolMappersAPI resourceID = Rest.mkAPIQueries (protocolMappersAPI resourceID) pName
+
+            mkUserAPI = UserAPIQueries {..}
+              where
+                userAPI :<|> roleMappingAPI = usersAPI
+
+                mkManageUserAPI = Rest.mkAPIQueries userAPI uUsername
+
+                mkRoleMappingAPI userID clientID =
+                  let list :<|> available :<|> add' :<|> delete' = roleMappingAPI userID clientID
+                      both = list >>= \l -> available >>= \a -> return (l ++ a)
+                      filter' = \rid ->
+                        ( \case
+                            [x] -> return x
+                            [] -> throwM Rest.NoItemFound
+                            _ -> throwM Rest.TooManyItemsFound
+                        )
+                          . filter (\v -> Rest.resourceID v == rid)
+                      filterByName' = \name ->
+                        ( \case
+                            [x] -> return x
+                            [] -> throwM Rest.NoItemFound
+                            _ -> throwM Rest.TooManyItemsFound
+                        )
+                          . filter (\v -> rmName (Rest.resourceInfo v) == name)
+                   in UserRoleMappingQueries
+                        { list = list,
+                          listAvailable = available,
+                          get = \rid -> list >>= filter' rid,
+                          getByName = \name -> both >>= filterByName' name,
+                          add = \name -> available >>= filter' name >>= \x -> add' [x],
+                          delete = \name -> list >>= filter' name >>= \x -> delete' [x]
+                        }
 
 -- | The error returned by Keycloak.
 data Error
