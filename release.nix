@@ -9,12 +9,14 @@ let
     overrides = self: super: rec {
       haskell-keycloak = self.callCabal2nix "haskell-keycloak" ./. { };
       Cabal = dontCheck (self.callHackage "Cabal" "3.2.1.0" {});
+      generic-data = dontCheck (self.callHackage "generic-data" "0.7.0.0" {});
     };
   };
 
   shellHaskellPackages = pkgs.haskell.packages.${compiler}.override {
     overrides = self: super: rec {
       Cabal = dontCheck (self.callHackage "Cabal" "3.2.1.0" {});
+      # hpack = dontCheck (self.callHackage "hpack" "0.34.4" {});
     };
   };
 
