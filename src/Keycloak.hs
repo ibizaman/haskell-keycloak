@@ -8,8 +8,10 @@
 
 -- |
 module Keycloak
-  ( ClientID (..),
+  ( defaultBaseUrl,
+    ClientID (..),
     AuthCredentials (..),
+    parseAuthCredentials,
     AuthToken,
     Realm (..),
     KeycloakClient (..),
@@ -56,9 +58,14 @@ import qualified Rest
 import Servant ((:<|>) (..), (:>))
 import qualified Servant as S
 import qualified Servant.Client as SC
+import qualified Utils
 import qualified Web.FormUrlEncoded as Web
 
+defaultBaseUrl :: SC.BaseUrl
+defaultBaseUrl = SC.BaseUrl SC.Http "localhost" 8080 "auth"
+
 newtype ClientID = ClientID {unClientID :: Text}
+  deriving (Show)
 
 instance S.ToHttpApiData ClientID where
   toUrlPiece = unClientID
@@ -68,6 +75,23 @@ data AuthCredentials = PasswordAuth
     password :: Text,
     clientId :: ClientID
   }
+  deriving (Show)
+
+-- | Parses a "CLIENTID:USERNAME:SECRET" string to an AuthCredentials.
+parseAuthCredentials :: String -> Maybe AuthCredentials
+parseAuthCredentials =
+  fmap
+    ( uncurry3 Keycloak.PasswordAuth
+        . trimap T.pack T.pack (Keycloak.ClientID . T.pack)
+    )
+    . Utils.joinTwo
+    . Utils.splitOn (== ':')
+
+trimap :: (a1 -> b1) -> (a2 -> b2) -> (a3 -> b3) -> (a1, a2, a3) -> (b1, b2, b3)
+trimap j k l (a, b, c) = (j a, k b, l c)
+
+uncurry3 :: (a -> b -> c -> d) -> (a, b, c) -> d
+uncurry3 f (a, b, c) = f a b c
 
 newtype Realm = Realm Text
 

@@ -9,33 +9,23 @@ module Main
 where
 
 import qualified Args
+import qualified ConfigFile
 import Control.Applicative (Alternative ((<|>)))
 import Control.Monad
   ( forM,
     forM_,
-    when,
   )
 import qualified Data.Aeson.Encode.Pretty as AesonP
 import qualified Data.ByteString.Lazy.Char8 as BS
-import qualified Data.List as List
 import Data.List.NonEmpty (NonEmpty ((:|)))
 import Data.Maybe (fromMaybe)
-import Data.Text
-  ( Text,
-    isPrefixOf,
-  )
+import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Env
--- import HumanReadable
---   ( HumanReadable,
---     printForHumans,
---   )
--- import qualified IP
 import qualified Keycloak
 import Network.HTTP.Client.TLS (newTlsManager)
 import qualified Options.Applicative.Help as Help
 import qualified Rest
-import qualified Servant as S
 import qualified Servant.Client as SC
 import System.Environment (getProgName)
 
@@ -43,17 +33,19 @@ main :: IO ()
 main =
   Args.getArgs >>= \args -> do
     env <- Env.getEnv
-    -- configFile <-
-    --   eitherToMaybe
-    --     <$> ConfigFile.parse
-    --       (maybe ConfigFile.defaultConfigFiles (:| []) $ Args.configFile args)
-    let auth = Env.auth env
-    -- let auth =
-    --       Args.credentials args
-    --         <|> Env.auth env
-    --         <|> (ConfigFile.apiKey <$> configFile)
-    -- let endpoint = Env.endpoint env
-    let endpoint = SC.BaseUrl SC.Http "arsenic" 8081 "auth"
+    configFile <-
+      eitherToMaybe
+        <$> ConfigFile.parse
+          (maybe ConfigFile.defaultConfigFiles (:| []) $ Args.configFile args)
+    let auth =
+          Args.credentials args
+            <|> Env.auth env
+            <|> (configFile >>= ConfigFile.apiKey)
+    let endpoint =
+          maybe Keycloak.defaultBaseUrl Env.asBaseUrl $
+            Args.endpoint args
+              <|> Env.endpoint env
+              <|> (configFile >>= ConfigFile.endpoint)
     case auth of
       Nothing -> do
         progName <- getProgName
@@ -413,6 +405,6 @@ mapRight :: (c -> d) -> Either a c -> Either a d
 mapRight _ (Left a) = Left a
 mapRight f (Right b) = Right $ f b
 
--- eitherToMaybe :: Either a b -> Maybe b
--- eitherToMaybe (Left _) = Nothing
--- eitherToMaybe (Right b) = Just b
+eitherToMaybe :: Either a b -> Maybe b
+eitherToMaybe (Left _) = Nothing
+eitherToMaybe (Right b) = Just b

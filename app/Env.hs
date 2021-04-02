@@ -5,6 +5,9 @@
 module Env
   ( Env,
     auth,
+    Endpoint,
+    endpoint,
+    asBaseUrl,
     getEnv,
   )
 where
@@ -12,7 +15,6 @@ where
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
--- import qualified Godaddy
 import qualified Keycloak
 import qualified Servant.Client as SC
 import qualified System.Envy as Envy
@@ -20,15 +22,15 @@ import qualified System.Envy as Envy
 data Env = Env
   { keycloakAuthUsername :: Maybe Text,
     keycloakAuthPassword :: Maybe Text,
-    keycloakAuthClientid :: Maybe ClientID
-    -- godaddyCustomEndpoint :: Maybe Endpoint,
-    -- godaddyTestEndpoint :: Bool
+    keycloakAuthClientid :: Maybe ClientID,
+    keycloakEndpoint :: Maybe Endpoint
   }
   deriving (Generic)
 
 instance Envy.FromEnv Env
 
 newtype Endpoint = Endpoint {unEndpoint :: SC.BaseUrl}
+  deriving (Show)
 
 instance Envy.Var Endpoint where
   toVar = SC.showBaseUrl . unEndpoint
@@ -41,13 +43,13 @@ instance Envy.Var ClientID where
   fromVar = Just . ClientID . T.pack
 
 getEnv :: IO Env
-getEnv = Envy.decodeWithDefaults (Env Nothing Nothing Nothing)
+getEnv = Envy.decodeWithDefaults (Env Nothing Nothing Nothing Nothing)
 
--- endpoint :: Env -> SC.BaseUrl
--- endpoint env = case (godaddyTestEndpoint env, godaddyCustomEndpoint env) of
---   (False, Just custom) -> Env.unEndpoint custom
---   (True, _) -> Godaddy.testBaseUrl
---   _ -> Godaddy.defaultBaseUrl
+endpoint :: Env -> Maybe Endpoint
+endpoint = keycloakEndpoint
+
+asBaseUrl :: Endpoint -> SC.BaseUrl
+asBaseUrl = unEndpoint
 
 auth :: Env -> Maybe Keycloak.AuthCredentials
 auth Env {..} =

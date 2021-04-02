@@ -18,8 +18,7 @@ module Args
   )
 where
 
-import Control.Monad (join)
-import Data.Bifunctor (Bifunctor (bimap, second))
+import Data.Bifunctor (Bifunctor (second))
 import Data.Char (toLower)
 import qualified Data.List as List
 import Data.List.NonEmpty
@@ -30,9 +29,7 @@ import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Typeable (Typeable)
-import GHC.Generics (Generic)
-import Generic.Data (Generically)
+import qualified Env
 import qualified Keycloak
 import Options.Applicative
   ( Alternative ((<|>)),
@@ -42,13 +39,15 @@ import qualified Options.Applicative as Opts
 import qualified Options.Applicative.Help.Pretty as P
 import qualified Options.Generic as OptGen
 import qualified Rest
+import qualified System.Envy as Envy
 import Text.Read (readEither)
 import Utils (splitOn)
 import qualified Utils
 
 data Args = Args
-  { -- configFile  :: Maybe Text
-    -- , credentials :: Maybe Godaddy.APIKey
+  { configFile :: Maybe Text,
+    credentials :: Maybe Keycloak.AuthCredentials,
+    endpoint :: Maybe Env.Endpoint,
     command :: Command
   }
 
@@ -99,32 +98,60 @@ data Command
 argsParser :: Opts.Parser Args
 argsParser =
   Args
-    <$> Opts.hsubparser
-      ( Opts.command
-          "authenticate"
+    <$> configFileParser
+    <*> credentialsParser
+    <*> baseUrlParser
+    <*> commandParser
+
+configFileParser :: Opts.Parser (Maybe Text)
+configFileParser =
+  Opts.optional $
+    Opts.option
+      Opts.str
+      (Opts.long "config" <> Opts.metavar "CONFIGFILE" <> Opts.showDefault)
+
+credentialsParser :: Opts.Parser (Maybe Keycloak.AuthCredentials)
+credentialsParser =
+  Opts.optional $
+    Opts.option
+      (Opts.maybeReader Keycloak.parseAuthCredentials)
+      (Opts.long "credentials" <> Opts.metavar "CLIENTID:USERNAME:SECRET")
+
+baseUrlParser :: Opts.Parser (Maybe Env.Endpoint)
+baseUrlParser =
+  Opts.optional $
+    Opts.option
+      (Opts.maybeReader Envy.fromVar)
+      (Opts.long "endpoint" <> Opts.metavar "scheme://host:port/path")
+
+commandParser :: Opts.Parser Command
+commandParser =
+  Opts.hsubparser
+    ( Opts.command
+        "authenticate"
+        ( Opts.info
+            (pure Authenticate)
+            (Opts.progDesc "Authenticate to the Keycloak server")
+        )
+        <> Opts.command
+          "client"
+          (Opts.info clientsParser (Opts.progDesc "Manage clients"))
+        <> Opts.command
+          "protocolmapper"
           ( Opts.info
-              (pure Authenticate)
-              (Opts.progDesc "Authenticate to the Keycloak server")
+              protocolMappersParser
+              (Opts.progDesc "Manage protocol mappers for clients")
           )
-          <> Opts.command
-            "client"
-            (Opts.info clientsParser (Opts.progDesc "Manage clients"))
-          <> Opts.command
-            "protocolmapper"
-            ( Opts.info
-                protocolMappersParser
-                (Opts.progDesc "Manage protocol mappers for clients")
-            )
-          <> Opts.command
-            "user"
-            (Opts.info usersParser (Opts.progDesc "Manage users"))
-          <> Opts.command
-            "rolemapping"
-            ( Opts.info
-                roleMappingParser
-                (Opts.progDesc "Manage role mappings for users")
-            )
-      )
+        <> Opts.command
+          "user"
+          (Opts.info usersParser (Opts.progDesc "Manage users"))
+        <> Opts.command
+          "rolemapping"
+          ( Opts.info
+              roleMappingParser
+              (Opts.progDesc "Manage role mappings for users")
+          )
+    )
 
 clientsParser :: Opts.Parser Command
 clientsParser =

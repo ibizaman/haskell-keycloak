@@ -11,6 +11,7 @@
 module Utils
   ( splitStringOnLastChar,
     splitOn,
+    joinTwo,
     lastMaybe,
   )
 where
@@ -28,6 +29,11 @@ splitOn :: (Char -> Bool) -> String -> [String]
 splitOn p s = case dropWhile p s of
   "" -> []
   s' -> w : splitOn p s'' where (w, s'') = break p s'
+
+-- | Keep 2 items in the list and join the rest.
+joinTwo :: [String] -> Maybe (String, String, String)
+joinTwo (fst : snd : rest) = Just (fst, snd, concat rest)
+joinTwo _ = Nothing
 
 -- | Return the last element of the list.
 lastMaybe :: [a] -> Maybe a
