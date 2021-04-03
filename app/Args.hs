@@ -5,11 +5,6 @@
 module Args
   ( Args (..),
     Command (..),
-    Realm (..),
-    Server (..),
-    IP (..),
-    ServerIP (..),
-    Subdomain (..),
     ClientIdentifier (..),
     ProtocolMapperIdentifier (..),
     UserIdentifier (..),
@@ -50,16 +45,6 @@ data Args = Args
     endpoint :: Maybe Env.Endpoint,
     command :: Command
   }
-
-newtype Realm = Realm {unRealm :: Text}
-
-newtype Server = Server {unServer :: Text}
-
-newtype IP = IP {unIP :: Text}
-
-data ServerIP = ServerIP Server IP
-
-newtype Subdomain = Subdomain {unSubdomain :: Text}
 
 data ClientIdentifier
   = ClientID Text
