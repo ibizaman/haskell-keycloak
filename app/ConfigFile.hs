@@ -50,20 +50,16 @@ parse :: NonEmpty Text -> IO (Either String ConfigFile)
 parse = fmap asum . traverse parseFile
   where
     parseFile :: Text -> IO (Either String ConfigFile)
-    parseFile file = do
-      r <-
-        \case
-          Error e -> do
-            Left $ "error in file " <> T.unpack file <> ": " <> e
-          FileContent f -> case Config.parseIniFile f apikeyConfig of
-            Left failure -> do
-              Left $ "error in file " <> T.unpack file <> ": " <> failure
-            Right v -> do
-              Right v
-          <$> readFileSafe file
-      putStrLn $ show r
-
-      return r
+    parseFile file =
+      \case
+        Error e -> do
+          Left $ "error in file " <> T.unpack file <> ": " <> e
+        FileContent f -> case Config.parseIniFile f apikeyConfig of
+          Left failure -> do
+            Left $ "error in file " <> T.unpack file <> ": " <> failure
+          Right v -> do
+            Right v
+        <$> readFileSafe file
 
 defaultConfigFiles :: NonEmpty Text
 defaultConfigFiles = "keycloak.conf" :| ["/etc/hskeycloak/keycloak.conf"]
