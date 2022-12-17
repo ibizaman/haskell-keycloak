@@ -1,3 +1,5 @@
+# Although not exactly equivalent to my initial goal, you should probably use https://github.com/adorsys/keycloak-config-cli instead.
+
 # Haskell Keycloack
 
 This project is a command-line interface to configure a Keycloak
